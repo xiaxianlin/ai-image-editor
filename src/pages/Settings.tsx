@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSettingsStore } from '@/store/settings'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Settings as SettingsIcon, Save, RotateCcw, Eye, EyeOff } from 'lucide-react'
+import TokenStats from '@/components/TokenStats'
 
 export default function Settings() {
   usePageTitle("设置")
@@ -15,11 +16,17 @@ export default function Settings() {
     apiKey,
     model,
     availableModels,
+    loadSettings,
     setApiEndpoint,
     setApiKey,
     setModel,
+    saveSettings,
     resetSettings
   } = useSettingsStore()
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
 
   const [showApiKey, setShowApiKey] = useState(false)
   const [tempSettings, setTempSettings] = useState({
@@ -28,10 +35,11 @@ export default function Settings() {
     model
   })
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setApiEndpoint(tempSettings.apiEndpoint)
     setApiKey(tempSettings.apiKey)
     setModel(tempSettings.model)
+    await saveSettings()
   }
 
   const handleReset = () => {
@@ -156,6 +164,9 @@ export default function Settings() {
             保存设置
           </Button>
         </div>
+
+        {/* Token 统计 */}
+        <TokenStats />
 
         {/* 设置说明 */}
         <Card>

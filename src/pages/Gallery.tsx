@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,8 +29,12 @@ import {
 import { useGalleryStore, ImageHistory } from '@/store/gallery'
 
 export default function Gallery() {
-  const { imageHistory, removeImageFromHistory } = useGalleryStore()
+  const { imageHistory, removeImageFromHistory, loadImageHistory } = useGalleryStore()
   usePageTitle("图库")
+
+  useEffect(() => {
+    loadImageHistory()
+  }, [])
 
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTag, setSelectedTag] = useState('all')

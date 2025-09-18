@@ -83,7 +83,7 @@ const defaultStylePresets: StylePreset[] = [
   }
 ]
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const useEditorStore = create<EditorState>((set) => ({
   // 初始状态
   originalImage: null,
   processedImage: null,

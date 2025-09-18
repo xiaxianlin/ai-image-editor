@@ -1,27 +1,38 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { useEditorStore, type StylePreset } from '@/store/editor'
 import { useGalleryStore } from '@/store/gallery'
+import { useConversationStore } from '@/store/conversation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { MessageCircle, Send, Trash2, User, Bot, Palette, Check } from 'lucide-react'
+import { MessageCircle, Send, User, Bot, Palette, Check, Plus, BarChart3, AlertCircle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import StyleSelectionModalWithCallback from './StyleSelectionModalWithCallback'
+import { TokenUsageDetail } from './TokenStats'
+import { processImageWithAI, getErrorMessage } from '@/utils/ai-api'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export default function ChatDialog() {
   const {
-    messages,
-    currentInput,
-    setCurrentInput,
-    addMessage,
-    clearMessages,
     originalImage,
     selectedStyle,
     setProcessedImage
   } = useEditorStore()
   
   const { addImageToHistory } = useGalleryStore()
+  
+  const {
+    currentConversation,
+    createConversation,
+    sendMessage,
+    loadConversations
+  } = useConversationStore()
+  
+  const [currentInput, setCurrentInput] = useState('')
+  const [showTokenStats, setShowTokenStats] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -31,52 +42,79 @@ export default function ChatDialog() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [currentConversation?.messages])
 
-  const handleSendMessage = () => {
-    if (!currentInput.trim()) return
-
-    // 添加用户消息
-    addMessage({
-      role: 'user',
-      content: currentInput
-    })
-
-    // 如果有原图，模拟图片处理
-    if (originalImage) {
-      // 模拟 AI 回复和图片处理
-      setTimeout(() => {
-        // 生成模拟的处理后图片（实际应用中这里会调用AI API）
-        const processedImageUrl = generateMockProcessedImage()
-        setProcessedImage(processedImageUrl)
-        
-        // 保存到图库
-        const imageMetadata = extractImageMetadata(originalImage)
-        addImageToHistory({
-          originalImage,
-          processedImage: processedImageUrl,
-          prompt: currentInput,
-          style: selectedStyle?.name || '自定义风格',
-          tags: extractTagsFromPrompt(currentInput),
-          metadata: imageMetadata
-        })
-
-        addMessage({
-          role: 'assistant',
-          content: '图片处理完成！我已经根据您的要求对图片进行了转换。处理后的图片已保存到图库中，您可以在图库页面查看和管理所有历史记录。'
-        })
-      }, 2000) // 模拟处理时间
-    } else {
-      // 没有图片时的普通回复
-      setTimeout(() => {
-        addMessage({
-          role: 'assistant',
-          content: '请先上传一张图片，然后我就可以根据您的要求进行处理了。'
-        })
-      }, 1000)
+  useEffect(() => {
+    // 初始化对话
+    const initConversation = async () => {
+      await loadConversations()
+      if (!currentConversation && originalImage) {
+        // 如果有图片但没有对话，创建新对话
+        await createConversation()
+      }
     }
+    initConversation()
+  }, [originalImage])
 
-    setCurrentInput('')
+  const handleSendMessage = async () => {
+    if (!currentInput.trim() || isProcessing) return
+
+    setError(null)
+    setIsProcessing(true)
+
+    try {
+      // 确保有对话
+      let conversationId = currentConversation?.id
+      if (!conversationId) {
+        conversationId = await createConversation(originalImage ? 'current_image' : undefined)
+      }
+
+      // 发送用户消息
+      await sendMessage(currentInput)
+
+      // 如果有原图，调用真实的 AI API
+      if (originalImage) {
+        try {
+          const aiResponse = await processImageWithAI(
+            conversationId,
+            currentInput,
+            originalImage,
+            selectedStyle?.name
+          )
+
+          // 生成处理后的图片（这里仍然使用模拟图片，实际应用中应该从 AI 响应中获取）
+          const processedImageUrl = generateMockProcessedImage()
+          setProcessedImage(processedImageUrl)
+          
+          // 保存到图库
+          const imageMetadata = extractImageMetadata()
+          addImageToHistory({
+            originalImage,
+            processedImage: processedImageUrl,
+            prompt: currentInput,
+            style: selectedStyle?.name || '自定义风格',
+            tags: extractTagsFromPrompt(currentInput),
+            metadata: {
+              ...imageMetadata,
+              tokensUsed: aiResponse.tokensUsed,
+              model: aiResponse.model,
+            }
+          })
+
+          console.log('AI 处理完成:', aiResponse)
+        } catch (aiError) {
+          console.error('AI 处理失败:', aiError)
+          setError(getErrorMessage(aiError))
+        }
+      }
+
+      setCurrentInput('')
+    } catch (error) {
+      console.error('发送消息失败:', error)
+      setError('发送消息失败，请重试')
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   // 生成模拟的处理后图片
@@ -98,7 +136,7 @@ export default function ChatDialog() {
   }
 
   // 从原图提取元数据
-  const extractImageMetadata = (imageUrl: string) => {
+  const extractImageMetadata = () => {
     // 这里应该从实际图片文件中提取元数据
     // 现在返回模拟数据
     return {
@@ -155,24 +193,54 @@ export default function ChatDialog() {
           <div className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5" />
             AI 对话
+            {currentConversation && (
+              <Badge variant="secondary" className="text-xs">
+                {currentConversation.total_tokens} tokens
+              </Badge>
+            )}
           </div>
-          {messages.length > 0 && (
+          <div className="flex items-center gap-1">
+            {currentConversation && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowTokenStats(!showTokenStats)}
+                className="h-8 w-8"
+              >
+                <BarChart3 className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
-              onClick={clearMessages}
+              onClick={() => createConversation()}
               className="h-8 w-8"
             >
-              <Trash2 className="h-4 w-4" />
+              <Plus className="h-4 w-4" />
             </Button>
-          )}
+          </div>
         </CardTitle>
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col p-4 space-y-4">
+        {/* Token 统计 */}
+        {showTokenStats && currentConversation && (
+          <div className="mb-4">
+            <TokenUsageDetail />
+          </div>
+        )}
+
+        {/* 错误显示 */}
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         {/* 消息列表 */}
         <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
-          {messages.length === 0 ? (
+          {!currentConversation?.messages || currentConversation.messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-500">
               <div className="text-center">
                 <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -183,7 +251,7 @@ export default function ChatDialog() {
               </div>
             </div>
           ) : (
-            messages.map((message) => (
+            currentConversation.messages.map((message) => (
               <div
                 key={message.id}
                 className={cn(
@@ -245,7 +313,7 @@ export default function ChatDialog() {
           <Textarea
             value={currentInput}
             onChange={(e) => setCurrentInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyPress}
             placeholder={
               originalImage 
                 ? "询问关于图片处理的问题，或点击'选择风格'快速生成提示词..."
@@ -269,18 +337,22 @@ export default function ChatDialog() {
               </StyleSelectionModalWithCallback>
               <Button
                 onClick={handleSendMessage}
-                disabled={!currentInput.trim() || !originalImage}
+                disabled={!currentInput.trim() || !originalImage || isProcessing}
                 size="sm"
               >
-                <Send className="h-4 w-4 mr-1" />
-                发送
+                {isProcessing ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4 mr-1" />
+                )}
+                {isProcessing ? '处理中...' : '发送'}
               </Button>
             </div>
           </div>
         </div>
 
         {/* 快捷问题 */}
-        {originalImage && messages.length === 0 && (
+        {originalImage && (!currentConversation?.messages || currentConversation.messages.length === 0) && (
           <div className="flex-shrink-0 space-y-2">
             <p className="text-xs text-gray-500">快捷问题：</p>
             <div className="flex flex-wrap gap-2">
