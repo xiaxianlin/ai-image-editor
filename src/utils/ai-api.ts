@@ -76,28 +76,35 @@ export async function callAIAPI(request: AIRequest): Promise<AIResponse> {
 }
 
 /**
- * 使用 AI 处理图像（包含对话管理）
+ * 简化的图片编辑工作流程（不依赖对话）
  */
-export async function processImageWithAI(
-  conversationId: string,
-  prompt: string,
-  imageData: string,
+export interface SimpleImageEditRequest {
+  image_data: string
+  prompt: string
   style?: string
-): Promise<AIResponse> {
-  try {
-    const response = await invoke<AIResponse>('process_image_with_ai', {
-      conversationId,
-      prompt,
-      imageData,
-      style,
-    })
+}
 
-    return {
-      content: response.content,
-      tokensUsed: response.tokensUsed,
-      model: response.model,
-      finishReason: response.finishReason,
-    }
+export interface SimpleImageEditResponse {
+  success: boolean
+  processed_image?: string
+  image_id: string
+  message: string
+  ai_response: AIResponse
+}
+
+/**
+ * 简化的图片编辑工作流程（不依赖对话）
+ */
+export async function simpleEditImageWorkflow(
+  request: SimpleImageEditRequest
+): Promise<SimpleImageEditResponse> {
+  try {
+    const response = await invoke<SimpleImageEditResponse>('simple_edit_image_workflow', {
+      image_data: request.image_data,
+      prompt: request.prompt,
+      style: request.style
+    })
+    return response
   } catch (error: any) {
     // 处理字符串错误（来自 Rust 的 String 错误）
     if (typeof error === 'string') {
@@ -115,7 +122,7 @@ export async function processImageWithAI(
         code: error.code,
       })
     }
-    
+
     throw new AIAPIError({
       errorType: 'unknown_error',
       message: error?.toString() || '未知错误',

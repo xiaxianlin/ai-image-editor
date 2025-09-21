@@ -1,7 +1,6 @@
 import { useRef, useEffect, useState } from 'react'
 import { useEditorStore, type StylePreset } from '@/store/editor'
 import { useGalleryStore } from '@/store/gallery'
-import { useConversationStore } from '@/store/conversation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,26 +9,22 @@ import { MessageCircle, Send, User, Bot, Palette, Check, Plus, BarChart3, AlertC
 import { cn } from '@/lib/utils'
 import StyleSelectionModalWithCallback from './StyleSelectionModalWithCallback'
 import { TokenUsageDetail } from './TokenStats'
-import { processImageWithAI, getErrorMessage } from '@/utils/ai-api'
+import { simpleEditImageWorkflow, getErrorMessage } from '@/utils/ai-api'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export default function ChatDialog() {
   const {
     originalImage,
     selectedStyle,
-    setProcessedImage
+    setProcessedImage,
+    messages,
+    addMessage,
+    currentInput,
+    setCurrentInput
   } = useEditorStore()
-  
+
   const { addImageToHistory } = useGalleryStore()
-  
-  const {
-    currentConversation,
-    createConversation,
-    sendMessage,
-    loadConversations
-  } = useConversationStore()
-  
-  const [currentInput, setCurrentInput] = useState('')
+
   const [showTokenStats, setShowTokenStats] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,18 +37,17 @@ export default function ChatDialog() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [currentConversation?.messages])
+  }, [messages])
 
   useEffect(() => {
-    // 初始化对话
-    const initConversation = async () => {
-      await loadConversations()
-      if (!currentConversation && originalImage) {
-        // 如果有图片但没有对话，创建新对话
-        await createConversation()
-      }
+    // 初始化本地消息（不再使用对话系统）
+    if (originalImage && messages.length === 0) {
+      // 如果有图片但没有消息，添加欢迎消息
+      addMessage({
+        role: 'assistant',
+        content: '欢迎使用AI图片编辑器！请描述您想要的效果。'
+      })
     }
-    initConversation()
   }, [originalImage])
 
   const handleSendMessage = async () => {
@@ -63,42 +57,45 @@ export default function ChatDialog() {
     setIsProcessing(true)
 
     try {
-      // 确保有对话
-      let conversationId = currentConversation?.id
-      if (!conversationId) {
-        conversationId = await createConversation(originalImage ? 'current_image' : undefined)
-      }
+      // 添加用户消息到本地状态（不再使用对话系统）
+      addMessage({
+        role: 'user',
+        content: currentInput
+      })
 
-      // 发送用户消息
-      await sendMessage(currentInput)
-
-      // 如果有原图，调用真实的 AI API
+      // 如果有原图，调用简化的 AI API
       if (originalImage) {
         try {
-          const aiResponse = await processImageWithAI(
-            conversationId,
-            currentInput,
-            originalImage,
-            selectedStyle?.name
-          )
+          const aiResponse = await simpleEditImageWorkflow({
+            image_data: originalImage,
+            prompt: currentInput,
+            style: selectedStyle?.name
+          })
 
-          // 生成处理后的图片（这里仍然使用模拟图片，实际应用中应该从 AI 响应中获取）
-          const processedImageUrl = generateMockProcessedImage()
-          setProcessedImage(processedImageUrl)
-          
+          // 使用返回的处理后图片
+          if (aiResponse.processed_image) {
+            setProcessedImage(aiResponse.processed_image)
+          }
+
           // 保存到图库
           const imageMetadata = extractImageMetadata()
           addImageToHistory({
             originalImage,
-            processedImage: processedImageUrl,
+            processedImage: aiResponse.processed_image || '',
             prompt: currentInput,
             style: selectedStyle?.name || '自定义风格',
             tags: extractTagsFromPrompt(currentInput),
             metadata: {
               ...imageMetadata,
-              tokensUsed: aiResponse.tokensUsed,
-              model: aiResponse.model,
+              tokensUsed: aiResponse.ai_response.tokensUsed,
+              model: aiResponse.ai_response.model,
             }
+          })
+
+          // 添加AI回复到本地消息
+          addMessage({
+            role: 'assistant',
+            content: aiResponse.ai_response.content
           })
 
           console.log('AI 处理完成:', aiResponse)
@@ -115,24 +112,6 @@ export default function ChatDialog() {
     } finally {
       setIsProcessing(false)
     }
-  }
-
-  // 生成模拟的处理后图片
-  const generateMockProcessedImage = () => {
-    // 这里应该调用实际的AI图片处理API
-    // 现在返回一个模拟的处理后图片
-    const colors = ['#3373dc', '#10b981', '#f59e4b', '#ef4444', '#8b5cf6', '#06b6d4']
-    const randomColor = colors[Math.floor(Math.random() * colors.length)]
-    
-    return `data:image/svg+xml;base64,${btoa(`
-      <svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
-        <rect width="400" height="400" fill="${randomColor}"/>
-        <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" 
-              font-family="monospace" font-size="16px" fill="white">
-          AI Processed
-        </text>
-      </svg>
-    `)}`
   }
 
   // 从原图提取元数据
@@ -193,27 +172,24 @@ export default function ChatDialog() {
           <div className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5" />
             AI 对话
-            {currentConversation && (
-              <Badge variant="secondary" className="text-xs">
-                {currentConversation.total_tokens} tokens
-              </Badge>
-            )}
           </div>
           <div className="flex items-center gap-1">
-            {currentConversation && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowTokenStats(!showTokenStats)}
-                className="h-8 w-8"
-              >
-                <BarChart3 className="h-4 w-4" />
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => createConversation()}
+              onClick={() => setShowTokenStats(!showTokenStats)}
+              className="h-8 w-8"
+            >
+              <BarChart3 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                // 清除消息
+                messages.length = 0
+                setCurrentInput('')
+              }}
               className="h-8 w-8"
             >
               <Plus className="h-4 w-4" />
@@ -224,7 +200,7 @@ export default function ChatDialog() {
 
       <CardContent className="flex-1 flex flex-col p-4 space-y-4">
         {/* Token 统计 */}
-        {showTokenStats && currentConversation && (
+        {showTokenStats && (
           <div className="mb-4">
             <TokenUsageDetail />
           </div>
@@ -240,7 +216,7 @@ export default function ChatDialog() {
 
         {/* 消息列表 */}
         <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
-          {!currentConversation?.messages || currentConversation.messages.length === 0 ? (
+          {!messages || messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-500">
               <div className="text-center">
                 <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -251,7 +227,7 @@ export default function ChatDialog() {
               </div>
             </div>
           ) : (
-            currentConversation.messages.map((message) => (
+            messages.map((message) => (
               <div
                 key={message.id}
                 className={cn(
@@ -264,7 +240,7 @@ export default function ChatDialog() {
                     <Bot className="h-4 w-4 text-blue-600" />
                   </div>
                 )}
-                
+
                 <div
                   className={cn(
                     "max-w-[80%] rounded-lg px-3 py-2",
@@ -352,7 +328,7 @@ export default function ChatDialog() {
         </div>
 
         {/* 快捷问题 */}
-        {originalImage && (!currentConversation?.messages || currentConversation.messages.length === 0) && (
+        {originalImage && (!messages || messages.length === 0) && (
           <div className="flex-shrink-0 space-y-2">
             <p className="text-xs text-gray-500">快捷问题：</p>
             <div className="flex flex-wrap gap-2">

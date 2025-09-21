@@ -1,13 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSettingsStore } from '@/store/settings'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Settings as SettingsIcon, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Settings as SettingsIcon, Save, RotateCcw, Eye, EyeOff } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import TokenStats from '@/components/TokenStats'
+
+// 防抖函数
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+  let timeout: NodeJS.Timeout
+
+  return (...args: Parameters<F>): Promise<ReturnType<F>> =>
+    new Promise((resolve) => {
+      clearTimeout(timeout)
+      timeout = setTimeout(() => resolve(func(...args)), waitFor)
+    })
+}
 
 export default function Settings() {
   usePageTitle("设置")
@@ -15,53 +26,125 @@ export default function Settings() {
     apiEndpoint,
     apiKey,
     model,
-    availableModels,
     loadSettings,
     setApiEndpoint,
     setApiKey,
     setModel,
-    saveSettings,
-    resetSettings
+    saveSettings
   } = useSettingsStore()
 
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
+  const [saveMessage, setSaveMessage] = useState('')
+
+  // 加载设置
   useEffect(() => {
     loadSettings()
   }, [])
 
-  const [showApiKey, setShowApiKey] = useState(false)
-  const [tempSettings, setTempSettings] = useState({
-    apiEndpoint,
-    apiKey,
-    model
-  })
+  // 自动保存函数（防抖）
+  const autoSave = useCallback(
+    debounce(async () => {
+      setSaveStatus('saving')
+      setSaveMessage('正在保存...')
+      try {
+        await saveSettings()
+        setSaveStatus('success')
+        setSaveMessage('设置已保存')
+        // 3秒后隐藏成功提示
+        setTimeout(() => {
+          setSaveStatus('idle')
+          setSaveMessage('')
+        }, 3000)
+      } catch (error) {
+        setSaveStatus('error')
+        setSaveMessage('保存失败，请重试')
+        // 5秒后隐藏错误提示
+        setTimeout(() => {
+          setSaveStatus('idle')
+          setSaveMessage('')
+        }, 5000)
+        console.error('Failed to save settings:', error)
+      } finally {
+        // isSaving 状态由 saveStatus 管理
+      }
+    }, 1000),
+    [saveSettings]
+  )
 
-  const handleSave = async () => {
-    setApiEndpoint(tempSettings.apiEndpoint)
-    setApiKey(tempSettings.apiKey)
-    setModel(tempSettings.model)
-    await saveSettings()
+  // 处理输入变化
+  const handleApiEndpointChange = (value: string) => {
+    setApiEndpoint(value)
+    autoSave()
   }
 
-  const handleReset = () => {
-    resetSettings()
-    setTempSettings({
-      apiEndpoint: 'https://api.openai.com/v1',
-      apiKey: '',
-      model: 'gpt-4-vision-preview'
-    })
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value)
+    autoSave()
   }
 
-  const hasChanges = 
-    tempSettings.apiEndpoint !== apiEndpoint ||
-    tempSettings.apiKey !== apiKey ||
-    tempSettings.model !== model
+  const handleModelChange = (value: string) => {
+    setModel(value)
+    autoSave()
+  }
 
   return (
     <div className="container mx-auto p-6 max-w-2xl">
       <div className="flex items-center gap-2 mb-6">
         <SettingsIcon className="h-6 w-6" />
         <h1 className="text-2xl font-bold">设置</h1>
+
+        {/* 保存状态提示 */}
+        <div className="ml-auto flex items-center gap-2">
+          {saveStatus === 'saving' && (
+            <div className="flex items-center gap-2 text-blue-600">
+              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+              <span className="text-sm">正在保存...</span>
+            </div>
+          )}
+          {saveStatus === 'success' && (
+            <div className="flex items-center gap-2 text-green-600">
+              <CheckCircle className="w-4 h-4" />
+              <span className="text-sm">设置已保存</span>
+            </div>
+          )}
+          {saveStatus === 'error' && (
+            <div className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">保存失败</span>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* 保存状态提示栏 */}
+      {saveStatus !== 'idle' && (
+        <Alert
+          variant={saveStatus === 'success' ? 'default' : saveStatus === 'error' ? 'destructive' : 'default'}
+          className="mb-6"
+        >
+          <div className="flex items-center gap-2">
+            {saveStatus === 'saving' && (
+              <>
+                <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                <AlertDescription className="text-blue-600">{saveMessage}</AlertDescription>
+              </>
+            )}
+            {saveStatus === 'success' && (
+              <>
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-600">{saveMessage}</AlertDescription>
+              </>
+            )}
+            {saveStatus === 'error' && (
+              <>
+                <AlertCircle className="h-4 w-4 text-red-600" />
+                <AlertDescription className="text-red-600">{saveMessage}</AlertDescription>
+              </>
+            )}
+          </div>
+        </Alert>
+      )}
 
       <div className="space-y-6">
         {/* API 配置 */}
@@ -69,7 +152,7 @@ export default function Settings() {
           <CardHeader>
             <CardTitle>API 配置</CardTitle>
             <CardDescription>
-              配置 AI 服务的 API 接口和认证信息
+              配置 AI 服务的连接信息
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -79,12 +162,9 @@ export default function Settings() {
               <Input
                 id="api-endpoint"
                 type="url"
-                placeholder="https://api.openai.com/v1"
-                value={tempSettings.apiEndpoint}
-                onChange={(e) => setTempSettings(prev => ({
-                  ...prev,
-                  apiEndpoint: e.target.value
-                }))}
+                placeholder="输入 API 接口地址"
+                value={apiEndpoint}
+                onChange={(e) => handleApiEndpointChange(e.target.value)}
               />
             </div>
 
@@ -95,12 +175,9 @@ export default function Settings() {
                 <Input
                   id="api-key"
                   type={showApiKey ? "text" : "password"}
-                  placeholder="输入你的 API Key"
-                  value={tempSettings.apiKey}
-                  onChange={(e) => setTempSettings(prev => ({
-                    ...prev,
-                    apiKey: e.target.value
-                  }))}
+                  placeholder="输入 API Key"
+                  value={apiKey}
+                  onChange={(e) => handleApiKeyChange(e.target.value)}
                   className="pr-10"
                 />
                 <Button
@@ -122,48 +199,16 @@ export default function Settings() {
             {/* 模型选择 */}
             <div className="space-y-2">
               <Label htmlFor="model">AI 模型</Label>
-              <Select
-                value={tempSettings.model}
-                onValueChange={(value) => setTempSettings(prev => ({
-                  ...prev,
-                  model: value
-                }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="选择 AI 模型" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableModels.map((modelOption) => (
-                    <SelectItem key={modelOption} value={modelOption}>
-                      {modelOption}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                id="model"
+                type="text"
+                placeholder="输入 AI 模型名称"
+                value={model}
+                onChange={(e) => handleModelChange(e.target.value)}
+              />
             </div>
           </CardContent>
         </Card>
-
-        {/* 操作按钮 */}
-        <div className="flex justify-between">
-          <Button
-            variant="outline"
-            onClick={handleReset}
-            className="flex items-center gap-2"
-          >
-            <RotateCcw className="h-4 w-4" />
-            重置设置
-          </Button>
-          
-          <Button
-            onClick={handleSave}
-            disabled={!hasChanges}
-            className="flex items-center gap-2"
-          >
-            <Save className="h-4 w-4" />
-            保存设置
-          </Button>
-        </div>
 
         {/* Token 统计 */}
         <TokenStats />
@@ -174,10 +219,10 @@ export default function Settings() {
             <CardTitle className="text-lg">使用说明</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>• <strong>API 接口地址</strong>：AI 服务的基础 URL，默认为 OpenAI 官方接口</p>
+            <p>• <strong>API 接口地址</strong>：AI 服务的基础 URL</p>
             <p>• <strong>API Key</strong>：用于身份验证的密钥，请确保密钥有效且有足够的配额</p>
-            <p>• <strong>AI 模型</strong>：选择用于图像处理的 AI 模型，不同模型有不同的特点和效果</p>
-            <p>• 设置会自动保存到本地，下次启动时会自动加载</p>
+            <p>• <strong>AI 模型</strong>：输入用于图像处理的 AI 模型名称</p>
+            <p>• 设置会自动保存，修改后无需手动点击保存按钮</p>
           </CardContent>
         </Card>
       </div>

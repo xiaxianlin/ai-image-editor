@@ -9,7 +9,7 @@ export default function Navigation() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ImageIcon className="h-6 w-6 text-primary" />
-          <span className="font-bold text-lg">AI 图片编辑器</span>
+          <span className="font-bold text-lg">AI修图</span>
         </div>
         
         <div className="flex items-center gap-2">

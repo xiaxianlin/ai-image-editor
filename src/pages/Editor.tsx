@@ -1,16 +1,37 @@
 import ImageUpload from "@/components/ImageUpload";
 import ImagePreview from "@/components/ImagePreview";
 import ChatDialog from "@/components/ChatDialog";
+import ConfigRequiredModal from "@/components/ConfigRequiredModal";
 import { useEditorStore } from "@/store/editor";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useConfigCheck } from "@/hooks/useConfigCheck";
 import { Image as ImageIcon } from "lucide-react";
 
 export default function Editor() {
   const { originalImage } = useEditorStore();
+  const { isConfigured, isLoading, errors } = useConfigCheck();
   usePageTitle("编辑器");
+
+  // 如果配置检查未完成，显示加载状态
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">正在检查配置...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col">
+      {/* 配置检查模态框 */}
+      <ConfigRequiredModal
+        isOpen={!isConfigured}
+        errors={errors}
+      />
+
       {/* 头部 */}
       <div className="flex-shrink-0 border-b bg-white px-6 py-4">
         <div className="flex items-center gap-2">

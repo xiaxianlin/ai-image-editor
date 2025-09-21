@@ -20,27 +20,32 @@ export interface EditorState {
   originalImage: string | null
   processedImage: string | null
   isProcessing: boolean
-  
+  currentImageId: string | null  // 当前处理的图片ID
+
   // 聊天对话
   messages: ChatMessage[]
   currentInput: string
-  
+
   // 风格预设
   selectedStyle: StylePreset | null
   customPrompt: string
-  
+
   // 操作方法
   setOriginalImage: (image: string | null) => void
   setProcessedImage: (image: string | null) => void
   setIsProcessing: (processing: boolean) => void
-  
+  setCurrentImageId: (imageId: string | null) => void
+
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void
   setCurrentInput: (input: string) => void
   clearMessages: () => void
-  
+
   setSelectedStyle: (style: StylePreset | null) => void
   setCustomPrompt: (prompt: string) => void
-  
+
+  // 图片编辑流程
+  processImage: (imageData: string, prompt: string, conversationId: string, style?: string) => Promise<string>
+
   resetEditor: () => void
 }
 
@@ -88,22 +93,26 @@ export const useEditorStore = create<EditorState>((set) => ({
   originalImage: null,
   processedImage: null,
   isProcessing: false,
-  
+  currentImageId: null,
+
   messages: [],
   currentInput: '',
-  
+
   selectedStyle: null,
   customPrompt: '',
   
   // 图片操作
-  setOriginalImage: (image: string | null) => 
+  setOriginalImage: (image: string | null) =>
     set({ originalImage: image }),
-  
-  setProcessedImage: (image: string | null) => 
+
+  setProcessedImage: (image: string | null) =>
     set({ processedImage: image }),
-  
-  setIsProcessing: (processing: boolean) => 
+
+  setIsProcessing: (processing: boolean) =>
     set({ isProcessing: processing }),
+
+  setCurrentImageId: (imageId: string | null) =>
+    set({ currentImageId: imageId }),
   
   // 聊天操作
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
@@ -127,14 +136,46 @@ export const useEditorStore = create<EditorState>((set) => ({
   setSelectedStyle: (style: StylePreset | null) => 
     set({ selectedStyle: style }),
   
-  setCustomPrompt: (prompt: string) => 
+  setCustomPrompt: (prompt: string) =>
     set({ customPrompt: prompt }),
-  
+
+  // 图片编辑流程（简化版本，不依赖对话）
+  processImage: async (imageData: string, prompt: string, _conversationId?: string, style?: string) => {
+    try {
+      set({ isProcessing: true })
+
+      // 使用新的简化工作流程API
+      const { simpleEditImageWorkflow } = await import('@/utils/ai-api')
+
+      const response = await simpleEditImageWorkflow({
+        image_data: imageData,
+        prompt,
+        style
+      })
+
+      if (response.success && response.processed_image) {
+        set({
+          processedImage: response.processed_image,
+          currentImageId: response.image_id
+        })
+        return response.processed_image
+      } else {
+        throw new Error(response.message || '图片处理失败')
+      }
+    } catch (error) {
+      console.error('图片处理失败:', error)
+      throw error
+    } finally {
+      set({ isProcessing: false })
+    }
+  },
+
   // 重置
   resetEditor: () => set({
     originalImage: null,
     processedImage: null,
     isProcessing: false,
+    currentImageId: null,
     messages: [],
     currentInput: '',
     selectedStyle: null,
